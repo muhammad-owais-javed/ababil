@@ -19,5 +19,19 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  model-puller:
+    image: ollama/ollama:${OLLAMA_VERSION:?set OLLAMA_VERSION in .env}
+    container_name: model-puller
+    environment:
+      - OLLAMA_HOST=ollama-engine:11434
+      - LLM_MODELS=${LLM_MODELS:?set LLM_MODELS in .env}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'for m in $$(echo "$$LLM_MODELS" | tr "," " "); do echo "Pulling $$m"; ollama pull "$$m" || exit 1; done'
+    depends_on:
+      ollama-engine:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   ollama_data:
