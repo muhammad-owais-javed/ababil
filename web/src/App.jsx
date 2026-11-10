@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { sendChat, resetChat } from "./api.js";
+import { streamChat, resetChat } from "./api.js";
 import "./App.css";
 
 export default function App() {
@@ -22,13 +22,24 @@ export default function App() {
     reader.readAsDataURL(file);
   }
 
+  // Add a piece of text to the assistant message that is currently being written.
+  function appendToLastMessage(piece) {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === prev.length - 1 ? { ...m, text: m.text + piece } : m))
+    );
+  }
+
   async function onSubmit(event) {
     event.preventDefault();
     const content = text.trim();
     if ((!content && !image) || busy) return;
 
-    const outgoing = { role: "user", text: content, image };
-    setMessages((prev) => [...prev, outgoing]);
+    const sentImage = image;
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: content, image: sentImage },
+      { role: "assistant", text: "" }, // filled in as the stream arrives
+    ]);
     setText("");
     setImage(null);
     if (fileInput.current) fileInput.current.value = "";
@@ -36,15 +47,24 @@ export default function App() {
     setError("");
 
     try {
-      const data = await sendChat({
+      const events = streamChat({
         sessionId,
         text: content || "Describe this image.",
-        images: outgoing.image ? [outgoing.image] : [],
+        images: sentImage ? [sentImage] : [],
       });
-      setSessionId(data.session_id);
-      setMessages((prev) => [...prev, { role: "assistant", text: data.reply }]);
+      for await (const event of events) {
+        if (event.session_id) setSessionId(event.session_id);
+        if (event.delta) appendToLastMessage(event.delta);
+        if (event.error) throw new Error(event.error);
+      }
     } catch (err) {
       setError(err.message);
+      // Remove the empty assistant placeholder if nothing arrived.
+      setMessages((prev) =>
+        prev.length && prev[prev.length - 1].role === "assistant" && !prev[prev.length - 1].text
+          ? prev.slice(0, -1)
+          : prev
+      );
     } finally {
       setBusy(false);
     }
@@ -71,10 +91,13 @@ export default function App() {
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}`}>
             {m.image && <img src={m.image} alt="attachment" />}
-            {m.text && <p>{m.text}</p>}
+            {m.role === "assistant" && !m.text ? (
+              <p className="pending">Thinking…</p>
+            ) : (
+              m.text && <p>{m.text}</p>
+            )}
           </div>
         ))}
-        {busy && <div className="bubble assistant pending">Thinking…</div>}
       </main>
 
       {error && <div className="error">{error}</div>}
