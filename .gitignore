@@ -1,4 +1,8 @@
 .env
 
+# Cache
+.vscode/
+__pycache__/
+
 # Internal Doc
 doc/
