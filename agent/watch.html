@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ababil</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#2a2e37; --text:#e6e6e6; --muted:#9aa4b2;
+          --blue:#2563eb; --amber:#b45309; --red:#b91c1c; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  #current { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: #22262f; color: var(--muted); white-space: nowrap; }
+  .pill.ok { color: #86efac; } .pill.run { color: #93c5fd; } .pill.stop { color: #fca5a5; }
+
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr);
+         grid-template-rows: minmax(0, 1fr); gap: 12px; padding: 12px 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; min-height: 0;
+          display: flex; flex-direction: column; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+             margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #screen-wrap { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+  #screen { width: 100%; display: block; border-radius: 6px; border: 1px solid var(--line); }
+  #screen-error { color: #fca5a5; font-size: 13px; margin: 0; padding: 10px; }
+
+  #feed { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; margin-top: 24px; }
+  .ev { border-left: 3px solid var(--line); padding: 6px 10px; margin: 0 0 10px; }
+  .ev .meta { font-size: 11px; color: var(--muted); }
+  .ev pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px;
+            background: var(--bg); padding: 8px; border-radius: 6px; font-family: ui-monospace, monospace; }
+  .task { border-color: #0891b2; } .step { border-color: #6b7280; } .model { border-color: #2563eb; }
+  .invalid, .error { border-color: #dc2626; } .command { border-color: #d97706; }
+  .result { border-color: #059669; } .finished { border-color: #7c3aed; } .stopnote { border-color: #f59e0b; }
+
+  footer { border-top: 1px solid var(--line); background: var(--card); padding: 10px 16px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip { background: #22262f; color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+          padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .composer { display: flex; gap: 8px; align-items: flex-end; margin: 0; }
+  textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; padding: 10px; font: inherit;
+             background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font: inherit; color: #fff; background: var(--blue); cursor: pointer; }
+  button:disabled { background: #374151; color: #9ca3af; cursor: not-allowed; }
+  #stop-step { background: var(--amber); }
+  #stop-now { background: var(--red); }
+  .hidden { display: none !important; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+  @media (max-width: 900px) {
+    html, body { height: auto; }
+    main { grid-template-columns: 1fr; grid-template-rows: auto; }
+    #feed { max-height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ababil</h1>
+  <span id="status" class="pill">connecting</span>
+  <span id="current"></span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Sandbox screen</h2>
+    <div id="screen-wrap"><img id="screen" alt="sandbox screen"></div>
+    <p id="screen-error" hidden>Screen unavailable.</p>
+  </section>
+  <section class="card">
+    <h2>Activity</h2>
+    <div id="feed"><p class="empty">No activity yet. Pick an example below or type a task.</p></div>
+  </section>
+</main>
+
+<footer>
+  <div class="chips" id="chips"></div>
+  <form class="composer" id="task-form">
+    <textarea id="task" rows="2" maxlength="2000"
+              placeholder="Type a task. Enter sends, Shift+Enter adds a line."></textarea>
+    <button id="run" type="submit">Run</button>
+    <button id="stop-step" type="button" class="hidden">Stop after this step</button>
+    <button id="stop-now" type="button" class="hidden">Stop now</button>
+  </form>
+  <div class="hint">Stop after this step finishes the current step, then halts. Stop now cancels the running command.</div>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const feed = $("feed"), statusEl = $("status"), currentEl = $("current");
+const form = $("task-form"), taskEl = $("task"), runBtn = $("run");
+const stopStepBtn = $("stop-step"), stopNowBtn = $("stop-now");
+const screen = $("screen"), screenError = $("screen-error");
+
+const EXAMPLES = [
+  ["Whoami", "Run whoami and tell me the output."],
+  ["Sleep twice", "Run sleep 20 twice, then tell me it finished."],
+  ["Long sleep", "Run sleep 60, then tell me it finished."],
+  ["Install figlet", "Install figlet, then run figlet with the text hi."],
+  ["Install htop", "Install htop, then tell me whether it installed."],
+];
+
+let running = false;      // a task is in progress
+let stopMode = null;      // null, "after_step" or "now"
+let connected = false;    // the event stream is open
+let lastOutcome = "idle"; // result of the last finished task
+let waitEl = null; 
+
+function updateStatus() {
+  let text, cls;
+  if (!connected) { text = "disconnected"; cls = "stop"; }
+  else if (running) { text = stopMode ? "stopping" : "running"; cls = "run"; }
+  else { text = lastOutcome; cls = lastOutcome === "done" ? "ok" : lastOutcome === "stopped" ? "stop" : ""; }
+  statusEl.textContent = text;
+  statusEl.className = "pill " + cls;
+}
+
+function applyControls() {
+  runBtn.disabled = running;
+  stopStepBtn.classList.toggle("hidden", !running);
+  stopNowBtn.classList.toggle("hidden", !running);
+  stopStepBtn.disabled = stopMode !== null;
+  stopNowBtn.disabled = stopMode === "now";
+  updateStatus();
+}
+
+function setRunning(value, mode = null) {
+  running = value;
+  stopMode = value ? mode : null;
+  applyControls();
+}
+
+function add(kind, title, body) {
+  feed.querySelector(".empty")?.remove();
+  const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  const div = document.createElement("div");
+  div.className = "ev " + kind;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = title;
+  div.appendChild(meta);
+  if (body) {
+    const pre = document.createElement("pre");
+    pre.textContent = body;
+    div.appendChild(pre);
+  }
+  feed.appendChild(div);
+  if (stick) feed.scrollTop = feed.scrollHeight;
+}
+
+function render(e) {
+  // Any event other than a wait update clears the waiting line.
+  if (e.kind !== "waiting" && waitEl) {
+    waitEl.remove();
+    waitEl = null;
+  }
+  switch (e.kind) {
+    case "task":
+      setRunning(true);
+      currentEl.textContent = e.task;
+      add("task", `${e.time}  TASK`, e.task);
+      break;
+    case "step":
+      add("step", `${e.time}  step ${e.step} of ${e.max_steps}`);
+      break;
+    case "waiting":
+      if (!waitEl) {
+        waitEl = document.createElement("div");
+        waitEl.className = "ev model";
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        waitEl.appendChild(meta);
+        feed.appendChild(waitEl);
+      }
+      waitEl.firstChild.textContent =
+        `waiting for the model… ${e.seconds}s (step ${e.step}). Stop now will end the run.`;
+      if (feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120) {
+        feed.scrollTop = feed.scrollHeight;
+      }
+      break;
+    case "model":
+      add("model", `${e.time}  model replied in ${e.seconds}s`, e.text);
+      break;
+    case "invalid":
+      add("invalid", `${e.time}  invalid reply`, e.error);
+      break;
+    case "command":
+      add("command", `${e.time}  command`, e.command);
+      break;
+    case "result": {
+      const out = [e.stdout && "stdout:\n" + e.stdout, e.stderr && "stderr:\n" + e.stderr]
+        .filter(Boolean).join("\n");
+      const label = e.cancelled ? "cancelled" : e.timed_out ? "timed out" : `exit ${e.exit_code}`;
+      add("result", `${e.time}  ${label}`, out || "(no output)");
+      break;
+    }
+    case "stop_requested":
+      setRunning(true, e.mode);
+      add("stopnote", `${e.time}  ${e.mode === "now" ? "stop now requested" : "stop after this step requested"}`,
+          e.mode === "now" ? "Cancelling the running command." : "Will halt when the current step finishes.");
+      break;
+    case "error":
+      add("error", `${e.time}  error`, e.message);
+      break;
+    case "finished":
+      setRunning(false);
+      currentEl.textContent = "";
+      lastOutcome = e.ok ? "done" : "stopped";
+      applyControls();
+      add("finished", `${e.time}  ${e.ok ? "DONE" : "NOT COMPLETED"}`, e.answer);
+      break;
+  }
+}
+
+// Live updates. The browser reconnects automatically and resumes from the last event.
+const source = new EventSource("/events");
+source.onopen = () => { connected = true; updateStatus(); };
+source.onerror = () => { connected = false; updateStatus(); };
+source.onmessage = (message) => render(JSON.parse(message.data));
+
+// The server's view is authoritative for the buttons when the page opens.
+fetch("/state").then((r) => r.json()).then((s) => {
+  if (s.status === "running") {
+    currentEl.textContent = s.task || "";
+    setRunning(true, s.stop_mode);
+  } else {
+    setRunning(false);
+  }
+});
+
+async function requestStop(mode) {
+  const response = await fetch("/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    add("error", "stop not applied", data.error || response.statusText);
+  }
+}
+stopStepBtn.addEventListener("click", () => requestStop("after_step"));
+stopNowBtn.addEventListener("click", () => requestStop("now"));
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const task = taskEl.value.trim();
+  if (running || !task) return;
+  runBtn.disabled = true;
+  const response = await fetch("/task", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task }),
+  });
+  if (response.status === 202) {
+    taskEl.value = "";
+  } else {
+    const data = await response.json().catch(() => ({}));
+    add("error", "could not start", data.error || response.statusText);
+    applyControls();
+  }
+});
+
+// Enter sends; Shift+Enter adds a new line.
+taskEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+const chips = $("chips");
+for (const [label, prompt] of EXAMPLES) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "chip";
+  chip.textContent = label;
+  chip.addEventListener("click", () => { taskEl.value = prompt; taskEl.focus(); });
+  chips.appendChild(chip);
+}
+
+function refreshScreen() {
+  screen.src = "/screenshot?t=" + Date.now();
+}
+screen.onload = () => (screenError.hidden = true);
+screen.onerror = () => (screenError.hidden = false);
+refreshScreen();
+setInterval(refreshScreen, 2000);
+
+applyControls();
+</script>
+</body>
+</html>
