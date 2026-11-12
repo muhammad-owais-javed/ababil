@@ -52,6 +52,23 @@ services:
     cpus: 4
     restart: unless-stopped
 
+  agent:
+    build: ./agent
+    container_name: agent-service
+    environment:
+      - OLLAMA_URL=http://ollama-engine:11434
+      - LLM_MODELS=${LLM_MODELS:?set LLM_MODELS in .env}
+      - SANDBOX_URL=http://sandbox-service:8001
+      - SANDBOX_TOKEN=${SANDBOX_TOKEN:?set SANDBOX_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8080:8080"   # watch page and task input, this machine only
+    depends_on:
+      ollama-engine:
+        condition: service_healthy
+      sandbox:
+        condition: service_started
+    restart: unless-stopped
+    
 volumes:
   ollama_data:
   sandbox_home:
