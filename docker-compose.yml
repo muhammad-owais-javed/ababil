@@ -11,6 +11,8 @@ services:
     environment:
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
@@ -32,6 +34,24 @@ services:
       ollama-engine:
         condition: service_healthy
     restart: "no"
+  sandbox:
+    build: ./sandbox
+    container_name: sandbox-service
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:?set VNC_PASSWORD in .env}
+      - SANDBOX_TOKEN=${SANDBOX_TOKEN:?set SANDBOX_TOKEN in .env}
+      - SCREEN_SIZE=1280x800
+    ports:
+      - "127.0.0.1:6080:6080"   # viewer, this machine only
+    expose:
+      - "8001"                  # API, reachable only inside the Docker network
+    volumes:
+      - sandbox_home:/root     # files and installs survive container restarts
+    shm_size: "512m"
+    mem_limit: 3g
+    cpus: 4
+    restart: unless-stopped
 
 volumes:
   ollama_data:
+  sandbox_home:
