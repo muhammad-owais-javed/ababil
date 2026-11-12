@@ -3,6 +3,10 @@
 # Cache
 .vscode/
 __pycache__/
+web/node_modules
 
 # Internal Doc
 doc/
+
+# Testing
+results/
